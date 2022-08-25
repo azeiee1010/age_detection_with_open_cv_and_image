@@ -24,11 +24,22 @@
         android:text="Pick image"
         android:textSize="24sp" />
 
+
+    <Button
+        android:id="@+id/btn_detect_face"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/btn_pick_image"
+        android:layout_centerHorizontal="true"
+        android:text="Detect Face"
+        android:textSize="24sp" />
+
+
     <Button
         android:id="@+id/btn_estimate_age"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@id/btn_pick_image"
+        android:layout_below="@id/btn_detect_face"
         android:layout_centerHorizontal="true"
         android:text="Estimate age"
         android:textSize="24sp" />
