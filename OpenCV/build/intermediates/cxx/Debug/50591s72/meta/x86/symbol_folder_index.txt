@@ -1,0 +1,1 @@
+/home/daffolap-1021/Downloads/opencv-4.6.0-android-sdk/OpenCV-android-sdk/sdk/build/intermediates/cxx/Debug/50591s72/obj/x86
