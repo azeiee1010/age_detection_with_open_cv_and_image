@@ -1,24 +1,22 @@
 package com.seamfix.latestagedetectionwithimage;
 
-
-import androidx.appcompat.app.AppCompatActivity;
-
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
-import android.util.Base64;
 import android.util.Log;
-
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
 import com.seamfix.latestagedetectionwithimage.databinding.ActivityMainBinding;
-
 import org.opencv.android.OpenCVLoader;
 import org.opencv.android.Utils;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfRect;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
@@ -26,36 +24,41 @@ import org.opencv.core.Size;
 import org.opencv.dnn.Dnn;
 import org.opencv.dnn.Net;
 import org.opencv.imgproc.Imgproc;
-
+import org.opencv.objdetect.CascadeClassifier;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 public class MainActivity extends AppCompatActivity {
 
-    //Sex and Age Recognition Areas
+    private static String TAG = "mainActivity";
+
+    //Age Recognition Areas
     private Net mAgeNet;
     private static final String[] AGES = new String[]{"0-2", "4-6", "8-13", "15-20", "25-32", "38-43", "48-53", "60+"};
 
-    private Net mGenderNet;
+    //Setting up detection area
+    private Size m65Size = new Size(65, 65);
+    private Size mDefault = new Size();
+
     private static final String[] GENDERS = new String[]{"male", "female"};
+    private Rect[] mFrontalFacesArray;
 
-    private static String TAG = "mainActivity";
-    private String imagePath;
     private Mat mat;
-    private Rect rect ;
+    private Rect rect;
     private ActivityMainBinding activityMainBinding;
+    private CascadeClassifier mFrontalFaceClassifier = null; //Front Face Cascade Classifier
 
-    
+    //check opencv loaded or not
     static {
-        if(OpenCVLoader.initDebug()){
+        if (OpenCVLoader.initDebug()) {
             Log.d(TAG, "static initializer: OpenCV loaded");
         }
     }
-    
-    
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -64,12 +67,24 @@ public class MainActivity extends AppCompatActivity {
         //loading models
         loadModels();
 
-        activityMainBinding.btnPickImage.setOnClickListener(v->{
+        activityMainBinding.btnPickImage.setOnClickListener(v -> {
+            activityMainBinding.txvResult.setText("0");
             pickimage();
         });
 
-        activityMainBinding.btnEstimateAge.setOnClickListener(v->{
-            activityMainBinding.txvResult.setText(analyseAge(mat,rect));
+        activityMainBinding.btnEstimateAge.setOnClickListener(v -> {
+            String ageResult = analyseAge(mat, rect);
+            activityMainBinding.txvResult.setText(ageResult);
+            Log.d(TAG, "onCreate: " + ageResult);
+        });
+
+        activityMainBinding.btnDetectFace.setOnClickListener(v->{
+            if(mat != null && rect !=null){
+                drawRectangle(mat,rect);
+            }else{
+                Toast.makeText(this, "Please pick an image.", Toast.LENGTH_SHORT).show();
+            }
+
         });
     }
 
@@ -86,22 +101,18 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "onCameraViewStarted| ageProto : " + proto + ",ageWeights : " + weights);
         mAgeNet = Dnn.readNetFromCaffe(proto, weights);
 
-        //Loading gender module
-        proto = getPath("deploy_gender.prototxt");
-        weights = getPath("gender_net.caffemodel");
-        Log.i(TAG, "onCameraViewStarted| genderProto : " + proto + ",genderWeights : " + weights);
-        mGenderNet = Dnn.readNetFromCaffe(proto, weights);
-
         if (mAgeNet.empty()) {
             Log.i(TAG, "Network loading failed");
         } else {
             Log.i(TAG, "Network loading success");
         }
+
+        initFrontalFace();
     }
 
     private String analyseAge(Mat mRgba, Rect face) {
         try {
-            Mat capturedFace = new Mat(mRgba,face);
+            Mat capturedFace = new Mat(mRgba, face);
             //Resizing pictures to resolution of Caffe model
             Imgproc.resize(capturedFace, capturedFace, new Size(227, 227));
             //Converting RGBA to BGR
@@ -122,6 +133,7 @@ public class MainActivity extends AppCompatActivity {
         }
         return null;
     }
+
     private String getPath(String file) {
         AssetManager assetManager = getApplicationContext().getAssets();
         BufferedInputStream inputStream;
@@ -160,23 +172,65 @@ public class MainActivity extends AppCompatActivity {
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             bitmap.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream);
             byte[] byteArray = byteArrayOutputStream.toByteArray();
-            imagePath = Base64.encodeToString(byteArray, Base64.NO_WRAP);
+           // imagePath = Base64.encodeToString(byteArray, Base64.NO_WRAP);
 
             //convert bitmap to mat
             Mat mat1 = new Mat();
-            Utils.bitmapToMat(bitmap,mat1);
+            Utils.bitmapToMat(bitmap, mat1);
             mat = mat1;
 
             //finding face area on image
-            rect = new Rect(20,0,50,70);
-           // rect = detectFaceArea();
+            //rect = new Rect(20, 0, 50, 70);
+            rect = detectFaceArea(mat);
 
         }
     }
 
-    private Rect detectFaceArea() {
-        Rect faceArea = new Rect();
+    private Rect detectFaceArea(Mat matt) {
 
-        return faceArea;
+        //Detection and display
+        MatOfRect frontalFaces = new MatOfRect();
+
+        if (mFrontalFaceClassifier != null) {//Here, two Size are used to detect faces. The smaller the size, the farther the detection distance is. Four parameters, 1.1, 5, 2, m65Size and mDefault, can improve the accuracy of detection. Five are confirmed five times. Baidu MultiScale is a specific method.
+            mFrontalFaceClassifier.detectMultiScale(matt, frontalFaces, 1.1, 5, 2, m65Size, mDefault);
+            mFrontalFacesArray = frontalFaces.toArray();
+            if (mFrontalFacesArray.length > 0) {
+                Log.i(TAG, "The number of faces is : " + mFrontalFacesArray.length);
+            }
+        }
+
+        if(mFrontalFacesArray.length>0){
+            return mFrontalFacesArray[0];
+        }else{
+            Toast.makeText(this, "Sorry, No face found. Please pick an image with face", Toast.LENGTH_LONG).show();
+        }
+       return null;
+    }
+
+    private void drawRectangle(Mat mat, Rect rect) {
+        Imgproc.rectangle(mat, new Point( rect.x, rect.y),
+               new Point((rect.x + rect.width), (rect.y + rect.height)), new Scalar(0,255.0,0), 5);
+
+    }
+
+    private void initFrontalFace() {
+        try {
+            //This model is relatively good for me.
+            InputStream is = getResources().openRawResource(R.raw.haarcascade_frontalface_alt); //OpenCV Face Model File: lbpcascade_frontalface_improved
+            File cascadeDir = getDir("cascade", Context.MODE_PRIVATE);
+            File mCascadeFile = new File(cascadeDir, "haarcascade_frontalface_alt.xml");
+            FileOutputStream os = new FileOutputStream(mCascadeFile);
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = is.read(buffer)) != -1) {
+                os.write(buffer, 0, bytesRead);
+            }
+            is.close();
+            os.close();
+            // Loading Face Classifier
+            mFrontalFaceClassifier = new CascadeClassifier(mCascadeFile.getAbsolutePath());
+        } catch (Exception e) {
+            Log.e(TAG, e.toString());
+        }
     }
 }
